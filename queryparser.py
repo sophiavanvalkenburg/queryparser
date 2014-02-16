@@ -17,6 +17,7 @@ app = Flask(__name__)
 @app.route('/parse', methods=['GET','POST'])
 def receive_parse_request():
     query_text = request.form.get('text')
+    network_fname = request.form.get('network_fname')
     auth = request.args.get('auth')
     if not query_text or not auth:
             response = {
@@ -24,7 +25,7 @@ def receive_parse_request():
                     }
     else:
         if authenticate(auth):
-            response = parse(query_text)
+            response = parse(query_text, network_fname)
         else:
             response = {"error": "auth code is incorrect" }
     return json.dumps(response)
@@ -32,18 +33,19 @@ def receive_parse_request():
 def authenticate(auth):
     return True
 
-def parse(query_text):
+def parse(query_text, network_fname):
     query_text = preprocess(query_text)
     tokens = word_tokenize(query_text)
     double_tokens = [ (w, w) for w in tokens ]
     tagged = pos_tag(tokens)
-    domain_tagged = tag_domains(tagged)
+    domain_tagged = tag_domains(tagged, network_fname)
     tg = tag_grammar()
     wg = word_grammar()
     t_cp = RegexpParser(compile_grammar(tg))
     w_cp = RegexpParser(compile_grammar(wg))
     tagged_result = t_cp.parse(domain_tagged)
     word_result = w_cp.parse(double_tokens)
+    slots = assign_slots(tokens, tagged_result, word_result)
     print 'tagged =',tagged
     print 'tagged result = ',tagged_result
     print 'word result =',word_result
@@ -57,7 +59,7 @@ def preprocess(string):
     -also replace <, > with gt, lt because these symbols are reserved.
     so 2/13/2014 becomes 2 / 13 / 2014
     """
-    string = string.lower()
+    string = string.strip().lower()
     punctuation = "~`!@#$%^&*()_+-={}|[]\\:\";'<>?,./"
     new_string = ""
     for ch in string:
@@ -168,30 +170,79 @@ def matches_domain(word, domain_synset, thresh=0.5):
         for synset2 in word_synsets:
             this_score = synset1.path_similarity(synset2)
             max_similarity_score = max( max_similarity_score, this_score)
-    print word, max_similarity_score
     return max_similarity_score >= thresh
 
-def tag_domains(tagged):
+def tag_domains(tagged, network_fname):
+    """
+    returns a list of (word, tag) tuples where some words are tagged as
+    MEDIA or NETWORK. MEDIA words are tagged using just one feature - 
+    wordnet path similarity between the synsets of the given word and
+    synsets of the words in the MEDIA category. NETWORK words are tagged
+    using the same method as MEDIA, but also if the word is part of a 
+    given network list.
+
+    In the future, we can add more features to the domain classifier.
+    We should also look at the next and previous words to match network
+    names instead of just checking one word (obviously, the current method
+    will not work for networks that are more than one word long)
+    """
     media_synset_list = media_synsets()
+    network_synset_list = network_synsets()
+    network_list = get_network_names(network_fname)
     domain_tagged = []
     for word, tag in tagged:
         if matches_domain(word, media_synset_list):
             tag = 'MEDIA'
+        elif (matches_domain(word, network_synset_list)
+                or word in network_list ):
+            tag = 'NETWORK'
         domain_tagged.append((word, tag))
     return domain_tagged
 
 def media_synsets():
     """
-    returns wordnet synsets for all words in the hardcoded list
-    in the future, perhaps this list can be generated in a better way.
+    returns wordnet synsets for all words in media list
     """
     words = ("media|video|photo|audio|clip|movie|news|content|advertisement|"
             "footage|story|coverage|tv|program|upload|file|radio|segment")
     wordlist = words.split("|")
+    return get_synsets(wordlist)
+
+def network_synsets():
+    """
+    returns wordnet synsets for all words in networks list. 
+    """
+    words = ("network|channel|affliate|broadcaster|distributor|provider|"
+            "telecast|communications")
+    wordlist = words.split("|")
+    return get_synsets(wordlist)
+
+def get_synsets(wordlist):
+    """
+    returns wordnet synsets for all words in the hardcoded list
+    in the future, perhaps this list can be generated in a better way.
+    """
     synsets = []
     for word in wordlist:
         synsets += wn.synsets(word,pos='n')
     return synsets
+
+def get_network_names(fname=None):
+    """
+    gets a list of network names from the given file
+    network name on each line
+    """
+    fname = "network-names.txt" if fname is None else fname
+    networks = []
+    try:
+        with open(fname, 'rb') as nfile:
+            for line in nfile:
+                line = preprocess(line)
+                networks.append(line)
+            nfile.close()
+    except IOError:
+        print "There was a problem reading %s."%fname
+    return networks
 
 if __name__ == "__main__":
     app.debug = True
