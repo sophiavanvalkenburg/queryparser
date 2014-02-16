@@ -87,21 +87,22 @@ def compile_grammar(glist):
 
 def tag_grammar():
     glist = [
-        ("MP",   "{<DT>?<JJ>*<MEDIA>+<N.*>*<POS>?}"),
-        ("QUOTE", "{<``><.*>*<''>}"),
-        ("PP",    "{<RB>?<IN|TO><[^IT].*>+}"),
+        ("MedP",    "{<DT>?<JJ>*<MEDIA>+<NN.*|NetP|NETWORK>*}"),
+        ("NetP",    "{<DT>?<JJ>*<NETWORK>+<NN.*|MedP|MEDIA>*}"),
+        ("PP",      "{<RB>?<IN|TO><[^IT].*>+}"),
+        ("PosP",    "{<.*><POS>}"),
+        ("QUOTE",   "{<``><.*>*<''>}"),
     ]
     return glist
 
 def word_grammar():
-    imported_grammars = (
-            num_grammar("NUM") + 
-            date_grammar("DATE")
-            )
+    NUM = num_grammar("NUM")
+    DATE = date_grammar("DATE")
     terminals = [
         ("CMP", "{<over|under|at least|at most|atleast|atmost|"
                 "more than|greater than|less than|fewer than|gt|lt>}"),
-        ("UNIT", "{<second|minute|hour|day|seconds|minutes|hours|days>}"),
+        ("UNIT", "{<sec|min|hr|second|minute|hour|day|seconds|minutes|hours|"
+                "days>}"),
         ("FROM", "{<after|starting|since|beginning|from>}"),
         ("TO", "{<before|ending|to>}"),
         ("ON", "{<on>}"),
@@ -111,12 +112,11 @@ def word_grammar():
         ("BY","{<by>}"),
         ("WITH","{<with>}"),
     ]
-    rules = [
-        ("LENGTH", "{<CMP>?<NUM|a><->?<UNIT><long>?}"),
-        ("DATE_FROM","{<FROM><DATE>}"),
-        ("DATE_TO", "{<TO><DATE>}"),
-        ]
-    return imported_grammars + terminals + rules
+    rules = (
+        NUM + [ ("LENGTH", "{<CMP>?<NUM|a><->?<UNIT><long>?}") ] +
+        DATE + [ ("DATE_FROM","{<FROM><DATE>}"), ("DATE_TO", "{<TO><DATE>}")]
+        )
+    return terminals + rules
 
 def num_grammar(tag="NUM"):
     DIGIT =     "<one|two|three|four|five|six|seven|eight|nine>"
@@ -138,21 +138,21 @@ def date_grammar(tag="DATE"):
     DAY_OF_WEEK = "<monday|tuesday|wednesday|thursday|friday|saturday|sunday>"
     YEAR = "<NUM>"
     DECADE = "<\d\d(\d\d)?s>"
-    MONTH =("(<january|jan|february|feb|march|mar|april|apr|june|jun|july|jul|"
+    MONTH =("<january|jan|february|feb|march|mar|april|apr|june|jun|july|jul|"
             "august|aug|september|sep|sept|october|oct|november|nov|december|"
-            "dec|NUM>)")
+            "dec|NUM>")
     ORD = "<first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth>"
     ORDCHARS = "<\d\d?(st|nd|rd|th)>"
     DAY = "(<NUM>" + "|" + ORD + "|" + ORDCHARS +")"
     SEP = "<\.|/|->?"
-    DATE_SEQ = (MONTH + SEP + DAY + "("+ SEP + YEAR + ")?|" +
+    DATE_SEQ = (MONTH + SEP + YEAR + "|" + 
+                MONTH + SEP + DAY + "("+ SEP + YEAR + ")?|" +
                 YEAR + SEP + MONTH + SEP + DAY + "|" + 
-                DAY + SEP + MONTH + "(" + SEP + YEAR + ")?|")
-    SINGLE = "(<yesterday|today>|"+YEAR+"|"+MONTH+"|"+DECADE+")"
-    DATE = ("{(" + MOD +"(<NUM>?"+UNIT + AGO + "?" + "|" +
+                DAY + SEP + MONTH + "(" + SEP + YEAR + ")?")
+    SINGLE = "<yesterday>|<today>|"+YEAR+"|"+MONTH+"|"+DECADE
+    DATE = ("{"+SINGLE+"|(" + MOD +"(<NUM>?"+UNIT + AGO + "?" + "|" +
              DAY_OF_WEEK + "|" + MONTH + "))|" +
-            "(" + DAY_OF_WEEK + "?" + DATE_SEQ + DAY_OF_WEEK + "?)|"
-            "(" + SINGLE + ")}" )
+            "(" + DAY_OF_WEEK + "?" + DATE_SEQ + DAY_OF_WEEK + "?)}")
     return NUM + [(tag, DATE)]
 
 def matches_domain(word, domain_synset, thresh=0.5):
