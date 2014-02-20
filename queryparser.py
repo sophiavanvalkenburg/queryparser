@@ -17,7 +17,7 @@ app = Flask(__name__)
 @app.route('/parse', methods=['GET','POST'])
 def receive_parse_request():
     query_text = request.form.get('text')
-    network_fname = request.form.get('network_fname')
+    network_json = request.form.get('networks')
     auth = request.args.get('auth')
     if not query_text or not auth:
             response = {
@@ -25,7 +25,7 @@ def receive_parse_request():
                     }
     else:
         if authenticate(auth):
-            response = parse(query_text, network_fname)
+            response = parse(query_text, network_json)
         else:
             response = {"error": "auth code is incorrect" }
     return json.dumps(response)
@@ -33,12 +33,12 @@ def receive_parse_request():
 def authenticate(auth):
     return True
 
-def parse(query_text, network_fname):
+def parse(query_text, networks_json):
     query_text = preprocess(query_text)
     tokens = word_tokenize(query_text)
     double_tokens = [ (w, w) for w in tokens ]
     tagged = pos_tag(tokens)
-    domain_tagged = tag_domains(tagged, network_fname)
+    domain_tagged = tag_domains(tagged, networks_json)
     tg = tag_grammar()
     wg = word_grammar()
     t_cp = RegexpParser(compile_grammar(tg))
@@ -54,10 +54,10 @@ def parse(query_text, network_fname):
 
 def preprocess(string):
     """ 
-    -make lowercase
+    -strip, make lowercase
     -space out punctuation. necessary to treat punctuation as separate tokens.
-    -also replace <, > with gt, lt because these symbols are reserved.
     so 2/13/2014 becomes 2 / 13 / 2014
+    -also replace <, > with gt, lt because these symbols are reserved.
     """
     string = string.strip().lower()
     punctuation = "~`!@#$%^&*()_+-={}|[]\\:\";'<>?,./"
@@ -172,7 +172,7 @@ def matches_domain(word, domain_synset, thresh=0.5):
             max_similarity_score = max( max_similarity_score, this_score)
     return max_similarity_score >= thresh
 
-def tag_domains(tagged, network_fname):
+def tag_domains(tagged, networks_json):
     """
     returns a list of (word, tag) tuples where some words are tagged as
     MEDIA or NETWORK. MEDIA words are tagged using just one feature - 
@@ -188,7 +188,7 @@ def tag_domains(tagged, network_fname):
     """
     media_synset_list = media_synsets()
     network_synset_list = network_synsets()
-    network_list = get_network_names(network_fname)
+    network_list = get_network_names(networks_json)
     domain_tagged = []
     for word, tag in tagged:
         if matches_domain(word, media_synset_list):
@@ -227,22 +227,18 @@ def get_synsets(wordlist):
         synsets += wn.synsets(word,pos='n')
     return synsets
 
-def get_network_names(fname=None):
+def get_network_names(networks_json=None):
     """
-    gets a list of network names from the given file
-    network name on each line
+    gets a list of network names from the given json list
     """
-    fname = "network-names.txt" if fname is None else fname
     networks = []
     try:
-        with open(fname, 'rb') as nfile:
-            for line in nfile:
-                line = preprocess(line)
-                networks.append(line)
-            nfile.close()
-    except IOError:
-        print "There was a problem reading %s."%fname
+        networks = [ preprocess(s) for s in json.loads(networks_json) ]
+
+    except ValueError:
+        print "Unable to parse JSON networks list"
     return networks
+
 
 if __name__ == "__main__":
     app.debug = True

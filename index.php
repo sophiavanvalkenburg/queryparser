@@ -22,13 +22,14 @@
 
             require $fileName;
         }
-       $query_text = stripslashes($_GET['query']);
-       if ( isset( $query_text) ){
-           $res = \NLQueryParser\QueryParser::parse($query_text, 
-               "test_auth", "localhost:5000/parse");
+        $query_text = stripslashes($_GET['query']);
+        $networks = array('NBC', 'MSNBC', 'NBCUniversal');
+        if ( isset( $query_text) ){
+            $res = \NLQueryParser\QueryParser::parse($query_text, 
+               "test_auth", $networks, "localhost:5000/parse");
             echo "<h3>QUERY:</h3><p>".$query_text."</p>";
             echo "<h3>RESULT:</h3><p>".$res."</p>";
-       }
+        }
     ?>
 
 </body>
