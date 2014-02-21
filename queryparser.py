@@ -164,7 +164,7 @@ def matches_domain(word, domain_synset, thresh=0.5):
     word            --  input word
     domain_synset   __  list of synsets representing the domain
     """
-    word_synsets = wn.synsets(word,pos='n')
+    word_synsets = get_synsets([word])
     max_similarity_score = 0
     for synset1 in domain_synset:
         for synset2 in word_synsets:
@@ -188,6 +188,7 @@ def tag_domains(tagged, networks_json):
     """
     media_synset_list = media_synsets()
     network_synset_list = network_synsets()
+    user_synset_list = user_synsets()
     network_list = get_network_names(networks_json)
     domain_tagged = []
     for word, tag in tagged:
@@ -196,6 +197,8 @@ def tag_domains(tagged, networks_json):
         elif (matches_domain(word, network_synset_list)
                 or word in network_list ):
             tag = 'NETWORK'
+        elif matches_domain(word, user_synset_list):
+            tag = 'USER'
         domain_tagged.append((word, tag))
     return domain_tagged
 
@@ -217,6 +220,14 @@ def network_synsets():
     wordlist = words.split("|")
     return get_synsets(wordlist)
 
+def user_synsets():
+    """
+    returns wordnet synsets for all words in users list. 
+    """
+    words = ("user|member|username")
+    wordlist = words.split("|")
+    return get_synsets(wordlist)
+
 def get_synsets(wordlist):
     """
     returns wordnet synsets for all words in the hardcoded list
@@ -224,7 +235,7 @@ def get_synsets(wordlist):
     """
     synsets = []
     for word in wordlist:
-        synsets += wn.synsets(word,pos='n')
+        synsets += wn.synsets(word)
     return synsets
 
 def get_network_names(networks_json=None):
