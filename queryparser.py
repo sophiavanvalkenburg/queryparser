@@ -115,21 +115,21 @@ def merge_tags(i, word, tt, wt):
     tt_category = tt[tt_ind][2]
     wt_category = wt[wt_ind][2]
     if wt_category == 'DATE':
-        return 'DATE_EXACT'
+        return 'DATE_1'
     elif wt_category == 'DATE_FROM':
         if tt_pos != 'IN':
-            return 'DATE_FROM'
+            return 'DATE_1'
         else:
             return SKIP
     elif wt_category == 'DATE_TO':
         if tt_pos != 'IN' and tt_pos != 'TO':
-            return 'DATE_TO'
+            return 'DATE_2'
         else:
             return SKIP
     elif wt_category == 'LENGTH':
         if tt_pos == 'CD' or tt_pos == 'LS':
             return 'LENGTH_NUM'
-        elif tt_pos == 'NN' or tt_pos == 'NNS':
+        elif tt_pos == 'NN' or tt_pos == 'NNS' or tt_pos == 'JJ':
             return 'LENGTH_UNIT'
         else:
             return SKIP
@@ -245,28 +245,34 @@ def num_grammar(tag="NUM"):
 
 def date_grammar(tag="DATE"):
     NUM = num_grammar("NUM")
-    MOD = "<last|this|this past|the past>"
-    AGO = "<ago|before|previous|prior|previously|since>"
-    UNIT = "<day|week|month|year|decade|days|weeks|months|years|decades>"
-    DAY_OF_WEEK = "<monday|tuesday|wednesday|thursday|friday|saturday|sunday>"
-    YEAR = "<NUM>"
-    DECADE = "<\d\d(\d\d)?s>"
+    DAY_OF_WEEK = ("<monday|mon|tuesday|tues|wednesday|wed|thursday|thur|"
+            "friday|fri|saturday|sat|sunday|sun>")
     MONTH =("<january|jan|february|feb|march|mar|april|apr|june|jun|july|jul|"
             "august|aug|september|sep|sept|october|oct|november|nov|december|"
-            "dec|NUM>")
+            "dec>")
+    YEAR = "<NUM>"
     ORD = "<first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth>"
     ORDCHARS = "<\d\d?(st|nd|rd|th)>"
     DAY = "(<NUM>" + "|" + ORD + "|" + ORDCHARS +")"
-    SEP = "<\.|/|->?"
-    DATE_SEQ = (MONTH + SEP + YEAR + "|" + 
-                MONTH + SEP + DAY + "("+ SEP + YEAR + ")?|" +
-                YEAR + SEP + MONTH + SEP + DAY + "|" + 
-                DAY + SEP + MONTH + "(" + SEP + YEAR + ")?")
-    SINGLE = "<yesterday>|<today>|"+YEAR+"|"+MONTH+"|"+DECADE
-    DATE = ("{"+SINGLE+"|(" + MOD +"(<NUM>?"+UNIT + AGO + "?" + "|" +
-             DAY_OF_WEEK + "|" + MONTH + "))|" +
-            "(" + DAY_OF_WEEK + "?" + DATE_SEQ + DAY_OF_WEEK + "?)}")
-    return NUM + [(tag, DATE)]
+    DECADE = "<\d\d(\d\d)?s>"
+    SEP = "<\.|/|-,>?"
+    DATE_SEQUENCE = ( DAY_OF_WEEK + "?" + SEP + 
+            "( <NUM>" + SEP + DAY + "(" + SEP + YEAR + ")? |"
+            + MONTH + SEP + DAY + "(" + SEP + YEAR + ")? |"
+            + DAY + SEP + MONTH + "(" + SEP + YEAR + ")? |"
+            + DAY + "<of>" + MONTH + ")" + SEP + DAY_OF_WEEK + "?" )
+    # specific date
+    SDATE = ( "{" + DATE_SEQUENCE + "|" + DAY_OF_WEEK + "|" + MONTH + "|" 
+            + DECADE + "|" + YEAR + "}" )
+
+    MOD = "<the last|last|this|this past|the past>"
+    AGO = "<ago|before|previous|prior|previously|since>"
+    UNIT = "<day|week|month|year|decade|days|weeks|months|years|decades>"
+    # relative date
+    RDATE = "{ <yesterday>|<today>|<NUM>"+UNIT+AGO+"|"+MOD+"<NUM>?"+UNIT + " }"
+    
+    return NUM + [("SDATE", SDATE),("RDATE", RDATE),(tag, "{<SDATE|RDATE>}")]
+
 
 def matches_domain(word, domain_synset, thresh=0.5):
     """
@@ -320,7 +326,7 @@ def media_synsets():
     returns wordnet synsets for all words in media list
     """
     words = ("media|video|photo|audio|clip|movie|news|content|advertisement|"
-            "footage|story|coverage|tv|program|upload|file|radio|segment")
+        "podcast|footage|story|coverage|tv|program|upload|file|radio|segment")
     wordlist = words.split("|")
     return get_synsets(wordlist)
 
