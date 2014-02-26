@@ -15,6 +15,7 @@ from flask import Flask, request
 from nltk import RegexpParser, word_tokenize, pos_tag
 from nltk.tree import Tree,ParentedTree
 from nltk.corpus import wordnet as wn
+from nltk.corpus import stopwords
 
 
 UNK = "UNK"
@@ -143,8 +144,6 @@ def convert_dates(tree):
                 date_str = datetime.date.strftime(date, '%m-%d-%Y')
                 subtree.node = 'SDATE'
                 subtree[:] = [(date_str, date_str)]
-            else:
-                subtree.node = UNK
     return tree
 
 def parse_raw_date(tree, default_date, today, **rd_kwargs):
@@ -183,6 +182,7 @@ def parse_raw_number(tree):
     return parsed_num
 
 def assign_slots(tokens, tag_tree, word_tree):
+    stopword_list = stopwords.words('english')
     tokens_with_slot_tags = []
     word_tree = ParentedTree.convert(word_tree)
     tag_tree = ParentedTree.convert(tag_tree)
@@ -206,7 +206,8 @@ def assign_slots(tokens, tag_tree, word_tree):
         elif tag == 'KEYWORD':
             if 'KEYWORDS' not in slots:
                 slots['KEYWORDS'] = []
-            slots['KEYWORDS'].append(word)
+            if word not in stopword_list:
+                slots['KEYWORDS'].append(word)
         else:
             if tag not in slots:
                 slots[tag] = word
@@ -215,7 +216,7 @@ def assign_slots(tokens, tag_tree, word_tree):
                 slots[tag] = ' '.join([previous_words, word])
     return slots
 
-def finalize_tage(i, word, tt, wt):
+def finalize_tags(i, word, tt, wt):
     tt_ind = tt.leaf_treeposition(i)
     wt_ind = wt.leaf_treeposition(i)
     tt_pos = tt[tt_ind][1]
