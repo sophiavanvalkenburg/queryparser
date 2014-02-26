@@ -118,7 +118,7 @@ def convert_dates(tree):
                         date = parse_raw_date(item, today, today, weeks=1)
                     elif item.node == 'NUM':
                         # TODO: this should really be a range
-                        parsed_num = parse_raw_number(raw_num)
+                        parsed_num = parse_raw_number(item)
                         # if it's 4 digits it's probably a year
                         if parsed_num >= 1900: # prolly only want recent years
                             date =parse_raw_date(item, default_date, today)
@@ -160,7 +160,7 @@ def parse_raw_date(tree, default_date, today, **rd_kwargs):
     return date
 
 def parse_raw_number(tree):
-    leaves = zip(*item.leaves())[0]
+    leaves = zip(*tree.leaves())[0]
     raw_num = ' '.join(leaves)
     try:
         parsed_num = int(raw_num)
