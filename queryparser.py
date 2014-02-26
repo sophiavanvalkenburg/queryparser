@@ -101,6 +101,7 @@ def convert_dates(tree):
             last_number = None
             for item in subtree:
                 if not isinstance(item, Tree):
+                    # it's just a word
                     if item[0] == 'yesterday':
                         date = today - rd.relativedelta(days=1)
                     elif item[0] == 'today':
@@ -115,33 +116,13 @@ def convert_dates(tree):
                     elif item.node == 'DAY_OF_WEEK':
                         date = parse_raw_date(item, today, today, weeks=1)
                     elif item.node == 'NUM':
-                        # if it's 4 digits it's probably a year
                         # TODO: this should really be a range
-                        leaves = zip(*item.leaves())[0]
-                        raw_num = ' '.join(leaves)
-                        try:
-                            yearnum = int(raw_num)
-                            if yearnum >= 1900: # prolly only want recent years
-                                date =parse_raw_date(item, default_date, today)
-                            else:
-                                # isn't a year
-                                last_number = int(raw_num)
-                        except ValueError:
-                            # isn't a year
-                            #for now,  use a limited dict to convert to number
-                            num_dict = {
-                                    'one':1,
-                                    'two':2,
-                                    'three':3,
-                                    'four':4,
-                                    'five':5,
-                                    'six':6,
-                                    'seven':7,
-                                    'eight':8,
-                                    'nine':9,
-                                    'ten':10,
-                                    }
-                            last_number = num_dict.get(raw_num)
+                        parsed_num = parse_raw_number(raw_num)
+                        # if it's 4 digits it's probably a year
+                        if parsed_num >= 1900: # prolly only want recent years
+                            date =parse_raw_date(item, default_date, today)
+                        else:
+                            last_number = parsed_num
                     elif item.node == 'DATE_UNIT':
                         if not last_number:
                             last_number = 1
@@ -178,6 +159,28 @@ def parse_raw_date(tree, default_date, today, **rd_kwargs):
         # don't want to be future date
         date = date - rd.relativedelta(**rd_kwargs)
     return date
+
+def parse_raw_number(tree):
+    leaves = zip(*item.leaves())[0]
+    raw_num = ' '.join(leaves)
+    try:
+        parsed_num = int(raw_num)
+    except ValueError:
+        #for now, just use a limited dict to convert to number
+        num_dict = {
+                'one':1,
+                'two':2,
+                'three':3,
+                'four':4,
+                'five':5,
+                'six':6,
+                'seven':7,
+                'eight':8,
+                'nine':9,
+                'ten':10,
+                }
+        parsed_num = num_dict.get(raw_num)
+    return parsed_num
 
 def assign_slots(tokens, tag_tree, word_tree):
     tokens_with_slot_tags = []
