@@ -20,6 +20,7 @@ from nltk.corpus import stopwords
 
 UNK = "UNK"
 SKIP = "SKIP"
+PUNCTUATION = "~`!@#$%^&*()_+-={}|[]\\:\";'<>?,./"
 
 app = Flask(__name__)
 
@@ -70,10 +71,9 @@ def preprocess(string):
     -also replace <, > with gt, lt because these symbols are reserved.
     """
     string = string.strip().lower()
-    punctuation = "~`!@#$%^&*()_+-={}|[]\\:\";'<>?,./"
     new_string = ""
     for ch in string:
-        if ch in punctuation:
+        if ch in PUNCTUATION:
             if ch == '>':
                 ch = 'gt'
             elif ch == '<':
@@ -94,7 +94,7 @@ def convert_dates(tree):
     default_date = datetime.datetime( today.year, 1, 1) 
     for subtree in tree.subtrees():
         if subtree.node == 'SDATE':
-            date = parse_raw_date(subtree, default_date, years=1)
+            date = parse_raw_date(subtree, default_date, today, years=1)
             date_str = datetime.date.strftime(date, '%m-%d-%Y')
             subtree[:] = [(date_str, date_str)]
         elif subtree.node == 'RDATE':
@@ -107,9 +107,6 @@ def convert_dates(tree):
                         date = today - rd.relativedelta(days=1)
                     elif item[0] == 'today':
                         date = today
-                    elif item[0] == 'recent':
-                        # TODO: this should really be a range
-                        date = today - rd.relativedelta(weeks=1)
                 else:
                     if item.node == 'MONTH':
                         # TODO: this should really be a range
@@ -120,8 +117,10 @@ def convert_dates(tree):
                         # TODO: this should really be a range
                         parsed_num = parse_raw_number(item)
                         # if it's 4 digits it's probably a year
-                        if parsed_num >= 1900: # prolly only want recent years
-                            date =parse_raw_date(item, default_date, today)
+                        if parsed_num >= 1900: # only want recent years
+                            yeardiff = parsed_num-today.year
+                            date = parse_raw_date(item, default_date, today,
+                                    years=yeardiff)
                         else:
                             last_number = parsed_num
                     elif item.node == 'DATE_UNIT':
@@ -206,7 +205,7 @@ def assign_slots(tokens, tag_tree, word_tree):
         elif tag == 'KEYWORD':
             if 'KEYWORDS' not in slots:
                 slots['KEYWORDS'] = []
-            if word not in stopword_list:
+            if word not in stopword_list and word not in PUNCTUATION:
                 slots['KEYWORDS'].append(word)
         else:
             if tag not in slots:
@@ -377,7 +376,7 @@ def date_grammar(specific_tag="SDATE", relative_tag="RDATE"):
     MOD = "<the last|last|this|this past|the past>"
     AGO = "<ago|before|previous|prior|previously|since|old>"
     UNIT = "{<day|week|month|year|decade|days|weeks|months|years|decades>}"
-    RELATIVE_DATE = ("{ <yesterday>|<today>|<recent>|<NUM><DATE_UNIT>"+AGO+
+    RELATIVE_DATE = ("{ <yesterday>|<today>|<NUM><DATE_UNIT>"+AGO+
             "|"+MOD+"<NUM>?<DATE_UNIT>" + "|"+MOD+"?<MONTH|DAY_OF_WEEK> |"+
             "<NUM> }")
     
