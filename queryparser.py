@@ -8,6 +8,9 @@ return a JSON string of the parsed values.
 
 """
 import json
+import datetime
+from dateutil import parser as dp
+from dateutil import relativedelta as rd
 from flask import Flask, request
 from nltk import RegexpParser, word_tokenize, pos_tag
 from nltk.tree import Tree,ParentedTree
@@ -42,18 +45,21 @@ def parse(query_text, networks_json):
     query_text = preprocess(query_text)
     tokens = word_tokenize(query_text)
     double_tokens = [ (w, w) for w in tokens ]
-    tagged = pos_tag(tokens)
+    wg = word_grammar()
+    w_cp = RegexpParser(compile_grammar(wg))
+    word_result = w_cp.parse(double_tokens)
+    word_result = convert_dates(word_result)
+    new_tokens = list(zip(*(word_result.leaves()))[0])
+    tagged = pos_tag(new_tokens)
     domain_tagged = tag_domains(tagged, networks_json)
     tg = tag_grammar()
-    wg = word_grammar()
     t_cp = RegexpParser(compile_grammar(tg))
-    w_cp = RegexpParser(compile_grammar(wg))
     tagged_result = t_cp.parse(domain_tagged)
-    word_result = w_cp.parse(double_tokens)
-    slots = assign_slots(tokens, tagged_result, word_result)
+    slots = assign_slots(new_tokens, tagged_result, word_result)
+    interpreted_input = make_sentence(slots)
     print 'tagged-result = ',tagged_result
     print 'word-result = ',word_result
-    return slots
+    return {"parse":slots, "interpreted":interpreted_input}
 
 def preprocess(string):
     """ 
@@ -75,6 +81,104 @@ def preprocess(string):
         new_string += ch
     return new_string
 
+def make_sentence(slots):
+    return ""
+
+def convert_dates(tree):
+    """
+    convert dates to one format (YYYY/MM/DD). also find relative dates.
+    """
+    today = datetime.datetime.today()
+    # default is jan 1
+    default_date = datetime.datetime( today.year, 1, 1) 
+    for subtree in tree.subtrees():
+        if subtree.node == 'SDATE':
+            date = parse_raw_date(subtree, default_date, years=1)
+            date_str = datetime.date.strftime(date, '%m-%d-%Y')
+            subtree[:] = [(date_str, date_str)]
+        elif subtree.node == 'RDATE':
+            date = None
+            last_number = None
+            for item in subtree:
+                if not isinstance(item, Tree):
+                    if item[0] == 'yesterday':
+                        date = today - rd.relativedelta(days=1)
+                    elif item[0] == 'today':
+                        date = today
+                    elif item[0] == 'recent':
+                        # TODO: this should really be a range
+                        date = today - rd.relativedelta(weeks=1)
+                else:
+                    if item.node == 'MONTH':
+                        # TODO: this should really be a range
+                        date = parse_raw_date(item,default_date,today,years=1)
+                    elif item.node == 'DAY_OF_WEEK':
+                        date = parse_raw_date(item, today, today, weeks=1)
+                    elif item.node == 'NUM':
+                        # if it's 4 digits it's probably a year
+                        # TODO: this should really be a range
+                        leaves = zip(*item.leaves())[0]
+                        raw_num = ' '.join(leaves)
+                        try:
+                            yearnum = int(raw_num)
+                            if yearnum >= 1900: # prolly only want recent years
+                                date =parse_raw_date(item, default_date, today)
+                            else:
+                                # isn't a year
+                                last_number = int(raw_num)
+                        except ValueError:
+                            # isn't a year
+                            #for now,  use a limited dict to convert to number
+                            num_dict = {
+                                    'one':1,
+                                    'two':2,
+                                    'three':3,
+                                    'four':4,
+                                    'five':5,
+                                    'six':6,
+                                    'seven':7,
+                                    'eight':8,
+                                    'nine':9,
+                                    'ten':10,
+                                    }
+                            last_number = num_dict.get(raw_num)
+                    elif item.node == 'DATE_UNIT':
+                        if not last_number:
+                            last_number = 1
+                        leaves = zip(*tree.leaves())[0]
+                        raw_unit = ' '.join(leaves)
+                        if 'day' in raw_unit:
+                            date = today - rd.relativedelta(days=last_number)
+                        elif 'week' in raw_unit:
+                            date = today - rd.relativedelta(weeks=last_number)
+                        elif 'month' in raw_unit:
+                            date = today - rd.relativedelta(months=last_number)
+                        elif 'year' in raw_unit:
+                            date = today - rd.relativedelta(years=last_number)
+                        elif 'decade' in raw_unit:
+                            date = today - rd.relativedelta(
+                                    years=10*last_number)
+            if date:
+                date_str = datetime.date.strftime(date, '%m-%d-%Y')
+                subtree.node = 'SDATE'
+                subtree[:] = [(date_str, date_str)]
+            else:
+                subtree.node = UNK
+    return tree
+
+def parse_raw_date(tree, default_date, today, **rd_kwargs):
+    leaves = zip(*tree.leaves())[0]
+    raw_date = ' '.join(leaves)
+    try:
+        date = dp.parse(raw_date, default=default_date)
+    except ValueError:
+        print "Error parsing date %s"%raw_date
+        return None
+    if date > today:
+        # don't want to be future date
+        date = date - rd.relativedelta(**rd_kwargs)
+    return date
+
 def assign_slots(tokens, tag_tree, word_tree):
     tokens_with_slot_tags = []
     word_tree = ParentedTree.convert(word_tree)
@@ -82,7 +186,7 @@ def assign_slots(tokens, tag_tree, word_tree):
     word_tree_with_cats = tag_words_with_categories(word_tree)
     tag_tree_with_cats = tag_words_with_categories(tag_tree)
     for i, word in enumerate(tokens):
-        tag = merge_tags(i, word, tag_tree_with_cats, word_tree_with_cats) 
+        tag = finalize_tags(i, word, tag_tree_with_cats, word_tree_with_cats) 
         tokens_with_slot_tags.append((word, tag))
     found_query_focus = False
     for i, item in enumerate(tokens_with_slot_tags):
@@ -108,22 +212,22 @@ def assign_slots(tokens, tag_tree, word_tree):
                 slots[tag] = ' '.join([previous_words, word])
     return slots
 
-def merge_tags(i, word, tt, wt):
+def finalize_tage(i, word, tt, wt):
     tt_ind = tt.leaf_treeposition(i)
     wt_ind = wt.leaf_treeposition(i)
     tt_pos = tt[tt_ind][1]
     tt_category = tt[tt_ind][2]
     wt_category = wt[wt_ind][2]
-    if wt_category == 'DATE':
-        return 'DATE_1'
-    elif wt_category == 'DATE_FROM':
+    if wt_category.endswith('DATE'):
+        return 'DATE_EXACT'
+    elif wt_category.endswith('DATE_FROM'):
         if tt_pos != 'IN':
-            return 'DATE_1'
+            return 'DATE_FROM'
         else:
             return SKIP
-    elif wt_category == 'DATE_TO':
+    elif wt_category.endswith('DATE_TO'):
         if tt_pos != 'IN' and tt_pos != 'TO':
-            return 'DATE_2'
+            return 'DATE_TO'
         else:
             return SKIP
     elif wt_category == 'LENGTH':
@@ -208,7 +312,7 @@ def tag_grammar():
 
 def word_grammar():
     NUM = num_grammar("NUM")
-    DATE = date_grammar("DATE")
+    DATE = date_grammar("SDATE", "RDATE")
     terminals = [
         ("CMP", "{<over|under|at least|at most|atleast|atmost|"
                 "more than|greater than|less than|fewer than|gt|lt>}"),
@@ -225,9 +329,12 @@ def word_grammar():
     ]
     rules = (
         NUM + [ ("LENGTH", "{<CMP>?<NUM|a><->?<UNIT><long>?}") ] +
-        DATE + [ ("DATE_FROM","{<FROM><DATE>}"), ("DATE_TO", "{<TO><DATE>}")] +
-        [ (UNK,   "{<.*>}",
-            "}<LENGTH|DATE.*|CMP|UNIT|FROM|TO|ON|IN|OF|ABOUT|BY|WITH>{") ]
+        DATE + [ ("SDATE_FROM","{<FROM><SDATE>}"), 
+            ("SDATE_TO", "{<TO><SDATE>}"),
+            ("RDATE_FROM", "{<FROM><RDATE>}"),
+            ("RDATE_TO", "{<TO><RDATE>}"),
+            (UNK,   "{<.*>}",
+            "}<LENGTH|.*DATE.*|CMP|UNIT|FROM|TO|ON|IN|OF|ABOUT|BY|WITH>{") ]
         )
     return terminals + rules
 
@@ -240,38 +347,39 @@ def num_grammar(tag="NUM"):
     NUMWORDS =  "(("+DIGIT+"|"+TEEN+"|"+TEN+")?"+LARGE+"?)"
     NUMCHARS =   "<\.>?<\d+>(<\.|/><\d+>)?"
     FRACTION =  "(<and><a><half|quarter>|<half>)"
-    NUM =       "{"+ NUMCHARS+ "|" + NUMWORDS + FRACTION + "?}"
+    NUM =       "{"+ NUMCHARS+ "|" + NUMWORDS + FRACTION + "?|" + FRACTION +"}"
     return [(tag, NUM)]
 
-def date_grammar(tag="DATE"):
+def date_grammar(specific_tag="SDATE", relative_tag="RDATE"):
     NUM = num_grammar("NUM")
-    DAY_OF_WEEK = ("<monday|mon|tuesday|tues|wednesday|wed|thursday|thur|"
-            "friday|fri|saturday|sat|sunday|sun>")
-    MONTH =("<january|jan|february|feb|march|mar|april|apr|june|jun|july|jul|"
+    DAY_OF_WEEK = ("{<monday|mon|tuesday|tues|wednesday|wed|thursday|thur|"
+            "friday|fri|saturday|sat|sunday|sun>}")
+    MONTH =("{<january|jan|february|feb|march|mar|april|apr|june|jun|july|jul|"
             "august|aug|september|sep|sept|october|oct|november|nov|december|"
-            "dec>")
-    YEAR = "<NUM>"
-    ORD = "<first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth>"
+            "dec>}")
+    ORD = ("<first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
+            "eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|"
+            "seventeeth|eigteenth|nineteenth|twentieth|thirtieth>")
     ORDCHARS = "<\d\d?(st|nd|rd|th)>"
-    DAY = "(<NUM>" + "|" + ORD + "|" + ORDCHARS +")"
-    DECADE = "<\d\d(\d\d)?s>"
-    SEP = "<\.|/|-,>?"
-    DATE_SEQUENCE = ( DAY_OF_WEEK + "?" + SEP + 
-            "( <NUM>" + SEP + DAY + "(" + SEP + YEAR + ")? |"
-            + MONTH + SEP + DAY + "(" + SEP + YEAR + ")? |"
-            + DAY + SEP + MONTH + "(" + SEP + YEAR + ")? |"
-            + DAY + "<of>" + MONTH + ")" + SEP + DAY_OF_WEEK + "?" )
-    # specific date
-    SDATE = ( "{" + DATE_SEQUENCE + "|" + DAY_OF_WEEK + "|" + MONTH + "|" 
-            + DECADE + "|" + YEAR + "}" )
+    DAY = "{" + ORD + "|" + ORDCHARS +"}"
+    SEP = "<\.|/|-|,>?"
+    SPECIFIC_DATE = ( "{<DAY_OF_WEEK>?" + SEP + 
+            "( <NUM>" + SEP + "<NUM> (" + SEP + "<NUM> )? |"
+            + "<MONTH>" + SEP + "<DAY|NUM> (" + SEP + "<NUM> )? |"
+            + "<DAY|NUM>" + SEP + "<MONTH> (" + SEP + "<NUM> )? |"
+            + "<DAY|NUM><of><MONTH>)" 
+            + SEP + "<DAY_OF_WEEK>?}" )
 
     MOD = "<the last|last|this|this past|the past>"
-    AGO = "<ago|before|previous|prior|previously|since>"
-    UNIT = "<day|week|month|year|decade|days|weeks|months|years|decades>"
-    # relative date
-    RDATE = "{ <yesterday>|<today>|<NUM>"+UNIT+AGO+"|"+MOD+"<NUM>?"+UNIT + " }"
+    AGO = "<ago|before|previous|prior|previously|since|old>"
+    UNIT = "{<day|week|month|year|decade|days|weeks|months|years|decades>}"
+    RELATIVE_DATE = ("{ <yesterday>|<today>|<recent>|<NUM><DATE_UNIT>"+AGO+
+            "|"+MOD+"<NUM>?<DATE_UNIT>" + "|"+MOD+"?<MONTH|DAY_OF_WEEK> |"+
+            "<NUM> }")
     
-    return NUM + [("SDATE", SDATE),("RDATE", RDATE),(tag, "{<SDATE|RDATE>}")]
+    return NUM + [("DATE_UNIT", UNIT), ("DAY_OF_WEEK", DAY_OF_WEEK),
+            ("DAY", DAY), ("MONTH", MONTH), 
+            (specific_tag, SPECIFIC_DATE), (relative_tag, RELATIVE_DATE)]
 
 
 def matches_domain(word, domain_synset, thresh=0.5):
